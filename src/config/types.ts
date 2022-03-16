@@ -248,6 +248,7 @@ export interface FormatExtras {
   };
   [kFilterParams]?: Record<string, unknown>;
   postprocessors?: Array<(output: string) => Promise<void>>;
+  templateContext?: FormatTemplateContext;
   html?: {
     [kDependencies]?: FormatDependency[];
     [kSassBundles]?: SassBundle[];
@@ -498,4 +499,9 @@ export interface FormatLanguage {
 
   // langauge variations e.g. eg, fr, etc.
   [key: string]: unknown;
+}
+
+export interface FormatTemplateContext {
+  template?: string;
+  partials?: string[];
 }
