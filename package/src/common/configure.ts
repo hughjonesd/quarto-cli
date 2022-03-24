@@ -17,12 +17,9 @@ import {
 
 import { Configuration } from "./config.ts";
 import {
-  Dependency,
+  configureDependency,
   kDependencies,
-  PlatformDependency,
 } from "./dependencies/dependencies.ts";
-import { archiveUrl } from "./archive-binary-dependencies.ts";
-import { formatResourcePath } from "../../../src/core/resources.ts";
 
 export async function configure(
   config: Configuration,
@@ -39,37 +36,7 @@ export async function configure(
 
   // Download dependencies
   for (const dependency of kDependencies) {
-    info(`Preparing ${dependency.name}`);
-    const archDep = dependency.architectureDependencies[Deno.build.arch];
-    if (archDep) {
-      const platformDep = archDep[Deno.build.os];
-      info(`Downloading ${dependency.name}`);
-
-      let targetFile;
-      try {
-        targetFile = await downloadBinaryDependency(
-          dependency,
-          platformDep,
-          config,
-        );
-      } catch (error) {
-        const msg =
-          `Failed to Download ${dependency.name}\nAre you sure that version ${dependency.version} of ${dependency.bucket} has been archived using './quarto-bld archive-bin-deps'?\n${error.message}`;
-        throw new Error(msg);
-      }
-
-      info(`Configuring ${dependency.name}`);
-      await platformDep.configure(targetFile);
-
-      info(`Cleaning up`);
-      Deno.removeSync(targetFile);
-    } else {
-      throw new Error(
-        `The architecture ${Deno.build.arch} is missing the dependency ${dependency.name}`,
-      );
-    }
-
-    info(`${dependency.name} complete.\n`);
+    await configureDependency(dependency, config);
   }
 
   // Move the quarto script into place
@@ -97,9 +64,6 @@ export async function configure(
   );
   writeDevConfig(devConfig, config.directoryInfo.bin);
   info("");
-
-  // Extract latest pandoc templates
-  await writePandocTemplates(config);
 
   // Set up a symlink (if appropriate)
   const symlinkPaths = ["/usr/local/bin/quarto", expandPath("~/bin/quarto")];
@@ -152,36 +116,6 @@ export async function configure(
   }
 }
 
-async function downloadBinaryDependency(
-  dependency: Dependency,
-  platformDependency: PlatformDependency,
-  configuration: Configuration,
-) {
-  const targetFile = join(
-    configuration.directoryInfo.bin,
-    platformDependency.filename,
-  );
-  const dlUrl = archiveUrl(dependency, platformDependency);
-
-  info("Downloading " + dlUrl);
-  info("to " + targetFile);
-  const response = await fetch(dlUrl);
-  if (response.status === 200) {
-    const blob = await response.blob();
-
-    const bytes = await blob.arrayBuffer();
-    const data = new Uint8Array(bytes);
-
-    Deno.writeFileSync(
-      targetFile,
-      data,
-    );
-    return targetFile;
-  } else {
-    throw new Error(response.statusText);
-  }
-}
-
 // note that this didn't actually work on windows (it froze and then deno was
 // inoperable on the machine until reboot!) so we moved it to script/batch
 // files on both platforms)
@@ -224,51 +158,4 @@ async function downloadDenoStdLibrary(config: Configuration) {
       DENO_DIR: denoCacheDir,
     },
   });
-}
-
-async function writePandocTemplates(config: Configuration) {
-  info("Reading latest pandoc templates...");
-  const binPath = config.directoryInfo.bin;
-  const formatTemplates = [{
-    pandoc: "html",
-    output: formatResourcePath("html", "pandoc/html.template"),
-  }, {
-    pandoc: "revealjs",
-    output: formatResourcePath("revealjs", "pandoc/revealjs.template"),
-  }, {
-    pandoc: "latex",
-    output: formatResourcePath("pdf", "pandoc/pdf.template"),
-  }];
-  for (const temp of formatTemplates) {
-    info(`> ${temp.pandoc}`);
-    const template = await readTemplate(temp.pandoc, binPath);
-    if (template) {
-      ensureDirSync(dirname(temp.output));
-      Deno.writeTextFileSync(temp.output, template);
-    } else {
-      throw new Error("Failed to read an expected template.");
-    }
-  }
-  info("done.");
-  info("");
-}
-
-async function readTemplate(format: string, bin: string): Promise<string> {
-  const result = await execProcess({
-    cmd: [join(bin, "pandoc"), "--print-default-template", format],
-    stdout: "piped",
-    stderr: "piped",
-  });
-
-  if (result.success) {
-    if (result.stdout) {
-      return result.stdout;
-    } else {
-      return "";
-    }
-  } else {
-    throw new Error(
-      `Failed to read default template for ${format} from Pandoc`,
-    );
-  }
 }
